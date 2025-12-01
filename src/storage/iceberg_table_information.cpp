@@ -166,6 +166,17 @@ IRCAPITableCredentials IcebergTableInformation::GetVendedCredentials(ClientConte
 		if (!oauth2_auth.default_region.empty()) {
 			user_defaults["region"] = oauth2_auth.default_region;
 		}
+		// Check if there's an iceberg secret with credential_chain provider for Azure/OneLake
+		// This allows extracting account_name from the secret
+		auto transaction = CatalogTransaction::GetSystemCatalogTransaction(context);
+		auto secret_match = context.db->GetSecretManager().LookupSecret(transaction, "", "iceberg");
+		if (secret_match.HasMatch()) {
+			auto &kv_secret = dynamic_cast<const KeyValueSecret &>(*secret_match.secret_entry->secret);
+			auto account_name_val = kv_secret.TryGetValue("account_name");
+			if (!account_name_val.IsNull()) {
+				user_defaults["account_name"] = account_name_val.ToString();
+			}
+		}
 	}
 
 	// Detect storage type from metadata location
@@ -198,11 +209,20 @@ IRCAPITableCredentials IcebergTableInformation::GetVendedCredentials(ClientConte
 			create_secret_input.name = StringUtil::Format("%s_%d_%s", secret_base_name, index, credential.prefix);
 
 			create_secret_input.type = storage_type;
-			create_secret_input.provider = "config";
 			create_secret_input.storage_type = "memory";
 			create_secret_input.options = config_options;
 
 			ParseConfigOptions(credential.config, create_secret_input.options, storage_type);
+			
+			// Use credential_chain provider if account_name is present (for Azure/OneLake)
+			// Otherwise use config provider
+			auto account_name_it = create_secret_input.options.find("account_name");
+			if (account_name_it != create_secret_input.options.end() && storage_type == "azure") {
+				create_secret_input.provider = "credential_chain";
+			} else {
+				create_secret_input.provider = "config";
+			}
+			
 			//! TODO: apply the 'overrides' retrieved from the /v1/config endpoint
 			result.storage_credentials.push_back(create_secret_input);
 		}
@@ -219,7 +239,15 @@ IRCAPITableCredentials IcebergTableInformation::GetVendedCredentials(ClientConte
 		config.options = config_options;
 		config.name = secret_base_name;
 		config.type = storage_type;
-		config.provider = "config";
+		
+		// Use credential_chain provider if account_name is present (for Azure/OneLake)
+		// Otherwise use config provider
+		auto account_name_it = config_options.find("account_name");
+		if (account_name_it != config_options.end() && storage_type == "azure") {
+			config.provider = "credential_chain";
+		} else {
+			config.provider = "config";
+		}
 		config.storage_type = "memory";
 	}
 

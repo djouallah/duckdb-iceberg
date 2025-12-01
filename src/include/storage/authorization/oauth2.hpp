@@ -22,6 +22,9 @@ public:
 	                       const string &client_secret, const string &scope);
 	static void SetCatalogSecretParameters(CreateSecretFunction &function);
 	static unique_ptr<BaseSecret> CreateCatalogSecretFunction(ClientContext &context, CreateSecretInput &input);
+	static void SetCatalogSecretParametersCredentialChain(CreateSecretFunction &function);
+	static unique_ptr<BaseSecret> CreateCatalogSecretFunctionCredentialChain(ClientContext &context,
+	                                                                         CreateSecretInput &input);
 
 public:
 	string grant_type;

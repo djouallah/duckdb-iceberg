@@ -77,6 +77,12 @@ static void LoadInternal(ExtensionLoader &loader) {
 	OAuth2Authorization::SetCatalogSecretParameters(secret_function);
 	loader.RegisterFunction(secret_function);
 
+	// Register credential_chain provider for Azure/OneLake
+	CreateSecretFunction credential_chain_function = {
+	    "iceberg", "credential_chain", OAuth2Authorization::CreateCatalogSecretFunctionCredentialChain};
+	OAuth2Authorization::SetCatalogSecretParametersCredentialChain(credential_chain_function);
+	loader.RegisterFunction(credential_chain_function);
+
 	auto &log_manager = instance.GetLogManager();
 	log_manager.RegisterLogType(make_uniq<IcebergLogType>());
 

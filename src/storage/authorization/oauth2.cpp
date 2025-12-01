@@ -24,6 +24,14 @@ static const case_insensitive_map_t<LogicalType> &IcebergSecretOptions() {
 	return options;
 }
 
+static const case_insensitive_map_t<LogicalType> &IcebergCredentialChainOptions() {
+	static const case_insensitive_map_t<LogicalType> options {
+	    {"chain", LogicalType::VARCHAR},
+	    {"account_name", LogicalType::VARCHAR},
+	    {"endpoint", LogicalType::VARCHAR}};
+	return options;
+}
+
 } // namespace
 
 OAuth2Authorization::OAuth2Authorization() : IRCAuthorization(IRCAuthorizationType::OAUTH2) {
@@ -269,6 +277,52 @@ unique_ptr<HTTPResponse> OAuth2Authorization::Request(RequestType request_type, 
 
 void OAuth2Authorization::SetCatalogSecretParameters(CreateSecretFunction &function) {
 	auto &options = IcebergSecretOptions();
+	function.named_parameters.insert(options.begin(), options.end());
+}
+
+unique_ptr<BaseSecret> OAuth2Authorization::CreateCatalogSecretFunctionCredentialChain(ClientContext &context,
+                                                                                       CreateSecretInput &input) {
+	// For credential_chain provider, we create a secret that will delegate to Azure extension
+	vector<string> prefix_paths;
+	auto result = make_uniq<KeyValueSecret>(prefix_paths, "iceberg", "credential_chain", input.name);
+	result->redact_keys = {};
+
+	auto &accepted_parameters = IcebergCredentialChainOptions();
+
+	for (const auto &named_param : input.options) {
+		auto &param_name = named_param.first;
+		auto it = accepted_parameters.find(param_name);
+		if (it != accepted_parameters.end()) {
+			result->secret_map[param_name] = named_param.second.ToString();
+		} else {
+			throw InvalidInputException("Unknown named parameter passed to CreateCatalogSecretFunctionCredentialChain: %s",
+			                            param_name);
+		}
+	}
+
+	// Validate required parameters
+	auto account_name_it = result->secret_map.find("account_name");
+	if (account_name_it == result->secret_map.end()) {
+		throw InvalidInputException("Missing required parameter 'account_name' for iceberg secret with credential_chain provider");
+	}
+
+	// Optional: validate chain parameter if provided
+	auto chain_it = result->secret_map.find("chain");
+	if (chain_it != result->secret_map.end()) {
+		auto chain_value = chain_it->second.ToString();
+		// Validate that chain is one of the supported values
+		static const case_insensitive_set_t valid_chains = {"cli", "managed_identity", "env", "credential_chain"};
+		if (!valid_chains.count(StringUtil::Lower(chain_value))) {
+			throw InvalidInputException("Invalid 'chain' value '%s'. Supported values are: 'cli', 'managed_identity', 'env', 'credential_chain'",
+			                            chain_value);
+		}
+	}
+
+	return std::move(result);
+}
+
+void OAuth2Authorization::SetCatalogSecretParametersCredentialChain(CreateSecretFunction &function) {
+	auto &options = IcebergCredentialChainOptions();
 	function.named_parameters.insert(options.begin(), options.end());
 }
 
